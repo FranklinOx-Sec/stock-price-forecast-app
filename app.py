@@ -1,48 +1,68 @@
-import yfinance as yf
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import yfinance as yf
 from statsmodels.tsa.arima.model import ARIMA
+import matplotlib.pyplot as plt
 
-# Streamlit page setup
-st.set_page_config(page_title="Stock Price Forecast", layout="centered")
+# App config
+st.set_page_config(page_title="Stock Forecast", layout="centered")
 st.title("📈 Stock Price Forecast: Google & Microsoft")
 
-# Sidebar input
-company = st.sidebar.selectbox("Select a company", ["Google (GOOG)", "Microsoft (MSFT)"])
-forecast_days = st.sidebar.selectbox("Forecast days", [7, 14, 30, 60, 90])
+# Sidebar inputs
+company = st.sidebar.selectbox("Select Company", ["Google (GOOG)", "Microsoft (MSFT)"])
+forecast_days = st.sidebar.slider("Forecast Days", 7, 90, 30)
 
-# Map company name to ticker
-ticker = "GOOG" if company == "Google (GOOG)" else "MSFT"
+# Ticker mapping
+ticker = "GOOG" if "Google" in company else "MSFT"
 
-# Download stock data
+# Download data
 df = yf.download(ticker, start="2020-01-01", end="2024-12-31")
-df = df[['Close']].dropna()
-df.columns = ['Price']  # Rename column to avoid confusion
-df.index.name = 'Date'
 
-# Display historical chart
-st.subheader(f"Historical Closing Price of {ticker}")
+# ✅ Fix column handling
+if df.empty:
+    st.error("No data downloaded.")
+    st.stop()
+
+# Flatten columns if multi-indexed
+if isinstance(df.columns, pd.MultiIndex):
+    df.columns = [' '.join(col).strip() for col in df.columns.values]
+
+# Find the 'Close' column
+close_col = next((col for col in df.columns if 'close' in col.lower()), None)
+
+if close_col is None:
+    st.error("No 'Close' column found in data.")
+    st.write("Available columns:", df.columns)
+    st.stop()
+
+# Clean up and prepare
+df = df[[close_col]].copy()
+df.columns = ['Price']
+df.index = pd.to_datetime(df.index)
+
+# Show historical data
+st.subheader(f"Historical Price of {ticker}")
 st.line_chart(df)
 
-# ARIMA Forecast
+# Fit ARIMA model
 try:
     model = ARIMA(df['Price'], order=(5, 1, 2))
-    model_fit = model.fit()
-
-    # Forecast future prices
-    forecast = model_fit.forecast(steps=forecast_days)
-    last_date = df.index[-1]
-    future_dates = pd.bdate_range(start=last_date + pd.Timedelta(days=1), periods=forecast_days)
-
-    forecast_df = pd.DataFrame({'Price': forecast}, index=future_dates)
-
-    # Combine historical and forecast
-    combined = pd.concat([df, forecast_df])
-    combined['Label'] = ['Actual'] * len(df) + ['Forecast'] * len(forecast_df)
-
-    # Plot combined forecast
-    st.subheader(f"{forecast_days}-Day Forecast")
-    st.line_chart(combined[['Price']])
-
+    fitted_model = model.fit()
+    forecast = fitted_model.forecast(steps=forecast_days)
 except Exception as e:
-    st.error(f"Model failed: {e}")
+    st.error(f"ARIMA model error: {e}")
+    st.stop()
+
+# Forecast dates
+last_date = df.index[-1]
+future_dates = pd.bdate_range(last_date + pd.Timedelta(days=1), periods=forecast_days)
+
+# Create forecast DataFrame
+forecast_df = pd.DataFrame({'Price': forecast.values}, index=future_dates)
+
+# Combine actual + forecast
+combined_df = pd.concat([df, forecast_df])
+
+# Plot final chart
+st.subheader(f"{forecast_days}-Day Forecast for {ticker}")
+st.line_chart(combined_df)
