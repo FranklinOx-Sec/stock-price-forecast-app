@@ -1,43 +1,48 @@
-
 import yfinance as yf
 import pandas as pd
-import matplotlib.pyplot as plt
 import streamlit as st
 from statsmodels.tsa.arima.model import ARIMA
 
-st.set_page_config(page_title="Stock Forecast App", layout="wide")
-st.title("📈 Google & Microsoft Stock Price Forecast")
+# Streamlit page setup
+st.set_page_config(page_title="Stock Price Forecast", layout="centered")
+st.title("📈 Stock Price Forecast: Google & Microsoft")
 
-# Sidebar controls
-company = st.sidebar.selectbox("Select Company", ["Google (GOOG)", "Microsoft (MSFT)"])
-forecast_days = st.sidebar.slider("Number of days to forecast", 7, 90, 30)
+# Sidebar input
+company = st.sidebar.selectbox("Select a company", ["Google (GOOG)", "Microsoft (MSFT)"])
+forecast_days = st.sidebar.selectbox("Forecast days", [7, 14, 30, 60, 90])
 
+# Map company name to ticker
 ticker = "GOOG" if company == "Google (GOOG)" else "MSFT"
 
-# Fetch data
+# Download stock data
 df = yf.download(ticker, start="2020-01-01", end="2024-12-31")
-close = df["Close"].dropna()
+df = df[['Close']].dropna()
+df.columns = ['Price']  # Rename column to avoid confusion
+df.index.name = 'Date'
 
-st.write(f"### Historical Close Price for {ticker}")
-st.line_chart(close)
+# Display historical chart
+st.subheader(f"Historical Closing Price of {ticker}")
+st.line_chart(df)
 
-# Fit ARIMA model
-model = ARIMA(close, order=(5,1,2))
-fitted = model.fit()
+# ARIMA Forecast
+try:
+    model = ARIMA(df['Price'], order=(5, 1, 2))
+    model_fit = model.fit()
 
-# Forecast future values
-forecast = fitted.forecast(steps=forecast_days)
+    # Forecast future prices
+    forecast = model_fit.forecast(steps=forecast_days)
+    last_date = df.index[-1]
+    future_dates = pd.bdate_range(start=last_date + pd.Timedelta(days=1), periods=forecast_days)
 
-# Create future index
-last_date = close.index[-1]
-forecast_index = pd.bdate_range(start=last_date + pd.Timedelta(days=1), periods=forecast_days)
+    forecast_df = pd.DataFrame({'Price': forecast}, index=future_dates)
 
-# Convert to DataFrame for plotting
-forecast_df = pd.DataFrame({'Forecast': forecast}, index=forecast_index)
+    # Combine historical and forecast
+    combined = pd.concat([df, forecast_df])
+    combined['Label'] = ['Actual'] * len(df) + ['Forecast'] * len(forecast_df)
 
-# Combine actual + forecast
-combined_df = pd.concat([close, forecast_df['Forecast']])
+    # Plot combined forecast
+    st.subheader(f"{forecast_days}-Day Forecast")
+    st.line_chart(combined[['Price']])
 
-# Plot
-st.write(f"### Forecasted Closing Prices for {forecast_days} Business Days")
-st.line_chart(combined_df)
+except Exception as e:
+    st.error(f"Model failed: {e}")
